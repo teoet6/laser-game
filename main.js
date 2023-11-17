@@ -2,6 +2,7 @@ const degrees = Math.PI / 180;
 
 const canvas = document.querySelector('#canvas');
 const gl = canvas.getContext('webgl');
+const glInstanced = gl.getExtension('ANGLE_instanced_arrays');
 
 let fov = 90 * degrees;
 
@@ -30,9 +31,6 @@ let lasers = new Map3d();
 
 let mirrorRenderable = null;
 
-const perspectiveNear = 0.1;
-const perspectiveFar = 100;
-
 const isKeyPressed = {};
 const isMousePressed = {};
 
@@ -51,14 +49,14 @@ const createRenderable = (renderable) => {
 		renderable.vertexShader = gl.createShader(gl.VERTEX_SHADER);
 		gl.shaderSource(renderable.vertexShader, renderable.vertexSrc);
 		gl.compileShader(renderable.vertexShader);
-		if (!gl.getShaderParameter(renderable.vertexShader, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(renderable.vertexShader));
+		if (!gl.getShaderParameter(renderable.vertexShader, gl.COMPILE_STATUS)) return console.error(gl.getShaderInfoLog(renderable.vertexShader));
 	}
 
 	if (renderable.fragmentSrc != undefined) {
 		renderable.fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
 		gl.shaderSource(renderable.fragmentShader, renderable.fragmentSrc);
 		gl.compileShader(renderable.fragmentShader);
-		if (!gl.getShaderParameter(renderable.fragmentShader, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(renderable.fragmentShader));
+		if (!gl.getShaderParameter(renderable.fragmentShader, gl.COMPILE_STATUS)) return console.error(gl.getShaderInfoLog(renderable.fragmentShader));
 	}
 
 	if (renderable.vertexShader != undefined && renderable.fragmentShader != undefined) {
@@ -67,7 +65,7 @@ const createRenderable = (renderable) => {
 		gl.attachShader(renderable.program, renderable.fragmentShader);
 		gl.linkProgram(renderable.program);
 
-		if (!gl.getProgramParameter(renderable.program, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(renderable.program));
+		if (!gl.getProgramParameter(renderable.program, gl.LINK_STATUS)) return console.error(gl.getProgramInfoLog(renderable.program));
 	}
 
 	if (renderable.arrays != undefined) {
@@ -111,19 +109,24 @@ const createRenderable = (renderable) => {
 				size: attrib.size,
 				type: attrib.type,
 				location: location,
+				index: index,
 			};
 		}
-
-		console.log(renderable.attribs);
 	}
 
-	if (!renderable.mode) console.error('Rendering mode not specified')
-	if (!renderable.count) console.error('Rendering count not specified')
+	if (!renderable.mode) return console.error('Rendering mode not specified')
+	if (!renderable.count) return console.error('Rendering count not specified')
 
 	return renderable;
 }
 
-const render = (renderable, attribs={}) => {
+const renderBatch = (renderable, attribsAos=[]) => {
+	const instanceAttribPointer = (location, dimension, type, norm, stride, offset) => {
+		gl.enableVertexAttribArray(location);
+		gl.vertexAttribPointer(location, dimension, type, norm, stride, offset);
+		glInstanced.vertexAttribDivisorANGLE(location, 1);
+	}
+
 	gl.useProgram(renderable.program);
 
 	if (renderable.arrayBuffers != undefined && renderable.program != undefined) {
@@ -146,8 +149,10 @@ const render = (renderable, attribs={}) => {
 				case gl.BOOL_VEC2  : gl.vertexAttribPointer(attrib.location, 2, gl.BOOL,  false, 0, 0); break;
 				case gl.BOOL_VEC3  : gl.vertexAttribPointer(attrib.location, 3, gl.BOOL,  false, 0, 0); break;
 				case gl.BOOL_VEC4  : gl.vertexAttribPointer(attrib.location, 4, gl.BOOL,  false, 0, 0); break;
-				default: console.error('Unrecognized attribute type:', attrib.type); debugger;
+				default: return console.error('Unrecognized attribute type:', attrib.type);
 			}
+
+			glInstanced.vertexAttribDivisorANGLE(attrib.location, 0); // TODO unify this and the instance drawing
 		}
 	}
 
@@ -158,63 +163,90 @@ const render = (renderable, attribs={}) => {
 		}
 	}
 
-	for (const [name, value] of Object.entries(attribs)) {
-		const attrib = renderable.attribs['a_' + name];
-		gl.disableVertexAttribArray(attrib.location);
+	const attribsSoa = {};
+	const attribsType = {};
+	const attribsCount = {};
+	const attribsBuffer = {};
 
-		switch (attrib.type) {
-			case gl.FLOAT      : gl.vertexAttrib1fv(attrib.location, value); break;
-			case gl.FLOAT_VEC2 : gl.vertexAttrib2fv(attrib.location, value); break;
-			case gl.FLOAT_VEC3 : gl.vertexAttrib3fv(attrib.location, value); break;
-			case gl.FLOAT_VEC4 : gl.vertexAttrib4fv(attrib.location, value); break;
+	for (const it of attribsAos) {
+		for (const [key, value] of Object.entries(it)) {
+			if (attribsSoa[key] == undefined) attribsSoa[key] = [];
+			attribsSoa[key].push(...value);
 
-			case gl.FLOAT_MAT2:
-				for (let i = 0; i < 2; i += 1) {
-					gl.disableVertexAttribArray(attrib.location + i);
-					gl.vertexAttrib2fv(attrib.location + i, value.slice(i * 2, (i+1) * 2));
-				}
-				break;
-			case gl.FLOAT_MAT3:
-				for (let i = 0; i < 3; i += 1) {
-					gl.disableVertexAttribArray(attrib.location + i);
-					gl.vertexAttrib3fv(attrib.location + i, value.slice(i * 3, (i+1) * 3));
-				}
-				break;
-			case gl.FLOAT_MAT4:
-				for (let i = 0; i < 4; i += 1) {
-					gl.disableVertexAttribArray(attrib.location + i);
-					gl.vertexAttrib4fv(attrib.location + i, value.slice(i * 4, (i+1) * 4));
-				}
-				break;
-			default: console.error('Unrecognized attribute type:', attrib.type); debugger;
+			if (attribsCount[key] == undefined) attribsCount[key] = 0;
+			attribsCount[key] += 1;
+
+			if (attribsType[key] == undefined) attribsType[key] = Object.getPrototypeOf(value);
+			if (Object.getPrototypeOf(value) != attribsType[key]) return console.error(key, 'has mismatching types', Object.getPrototypeOf(value), attribsType[key]);
 		}
 	}
 
-	// for (const [name, value] of Object.entries(uniforms)) {
-	// 	const location = gl.getUniformLocation(renderable.program, 'u_' + name);
-	// 	const uniform = gl.getActiveUniform(renderable.program, location);
+	for (const [key, count] of Object.entries(attribsCount)) {
+		if (count != attribsAos.length) return console.error(key, 'has', count, 'occurences in', attribsAos.length, 'instances');
+	}
 
-	// 	switch (uniform.type) {
-	// 		case gl.FLOAT      : gl.uniform1fj(location, value); break;
-	// 		case gl.FLOAT_VEC2 : gl.uniform2fv(location, value); break;
-	// 		case gl.FLOAT_VEC3 : gl.uniform3fv(location, value); break;
-	// 		case gl.FLOAT_VEC4 : gl.uniform4fv(location, value); break;
-	// 		case gl.INT        : gl.uniform1iv(location, value); break;
-	// 		case gl.INT_VEC2   : gl.uniform2iv(location, value); break;
-	// 		case gl.INT_VEC3   : gl.uniform3iv(location, value); break;
-	// 		case gl.INT_VEC4   : gl.uniform4iv(location, value); break;
-	// 		case gl.FLOAT_MAT2 : gl.uniformMatrix2fv(location, false, value); break;
-	// 		case gl.FLOAT_MAT3 : gl.uniformMatrix3fv(location, false, value); break;
-	// 		case gl.FLOAT_MAT4 : gl.uniformMatrix4fv(location, false, value); break;
-	// 		default: console.error('Unrecognized uniform type:', attrib.type);
-	// 	}
-	// }
+	for (const name of Object.keys(attribsSoa)) {
+		attribsBuffer[name] = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, attribsBuffer[name]);
+		gl.bufferData(gl.ARRAY_BUFFER, new attribsType[name].constructor(attribsSoa[name]), gl.STREAM_DRAW);
+
+		const attrib = renderable.attribs['a_' + name];
+
+		// if (attrib.location == 1) debugger;
+
+		const vertexAttribPointerMatrix = (type, dimension) => {
+			for (let i = 0; i < dimension; i += 1) {
+				instanceAttribPointer(
+					attrib.location + i,
+					dimension,
+					type,
+					false,
+					attribsType[name].BYTES_PER_ELEMENT * dimension * dimension,
+					attribsType[name].BYTES_PER_ELEMENT * dimension * i,
+				);
+			}
+		}
+
+		switch (attrib.type) {
+			case gl.FLOAT      : instanceAttribPointer(attrib.location, 1, gl.FLOAT, false, 0, 0); break;
+			case gl.FLOAT_VEC2 : instanceAttribPointer(attrib.location, 2, gl.FLOAT, false, 0, 0); break;
+			case gl.FLOAT_VEC3 : instanceAttribPointer(attrib.location, 3, gl.FLOAT, false, 0, 0); break;
+			case gl.FLOAT_VEC4 : instanceAttribPointer(attrib.location, 4, gl.FLOAT, false, 0, 0); break;
+			case gl.INT        : instanceAttribPointer(attrib.location, 1, gl.INT,   false, 0, 0); break;
+			case gl.INT_VEC2   : instanceAttribPointer(attrib.location, 2, gl.INT,   false, 0, 0); break;
+			case gl.INT_VEC3   : instanceAttribPointer(attrib.location, 3, gl.INT,   false, 0, 0); break;
+			case gl.INT_VEC4   : instanceAttribPointer(attrib.location, 4, gl.INT,   false, 0, 0); break;
+			case gl.BOOL       : instanceAttribPointer(attrib.location, 1, gl.BOOL,  false, 0, 0); break;
+			case gl.BOOL_VEC2  : instanceAttribPointer(attrib.location, 2, gl.BOOL,  false, 0, 0); break;
+			case gl.BOOL_VEC3  : instanceAttribPointer(attrib.location, 3, gl.BOOL,  false, 0, 0); break;
+			case gl.BOOL_VEC4  : instanceAttribPointer(attrib.location, 4, gl.BOOL,  false, 0, 0); break;
+			case gl.FLOAT_MAT2 : vertexAttribPointerMatrix(gl.FLOAT, 2); break;
+			case gl.FLOAT_MAT3 : vertexAttribPointerMatrix(gl.FLOAT, 3); break;
+			case gl.FLOAT_MAT4 : vertexAttribPointerMatrix(gl.FLOAT, 4); break;
+			default: return console.error('Unrecognized attribute type:', attrib.type);
+		}
+	}
 
 	if (renderable.elementBuffer != undefined) {
 		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, renderable.elementBuffer);
-		gl.drawElements(renderable.mode, renderable.count, gl.UNSIGNED_SHORT, 0);
+		// gl.drawElements(renderable.mode, renderable.count, gl.UNSIGNED_SHORT, 0);
+		glInstanced.drawElementsInstancedANGLE(renderable.mode, renderable.count, gl.UNSIGNED_SHORT, 0, attribsAos.length);
 	} else {
-		gl.drawArrays(renderable.mode, 0, renderable.count);
+		// gl.drawArrays(renderable.mode, 0, renderable.count);
+		glInstanced.drawArraysInstancedANGLE(renderable.mode, 0, renderable.count, attribsAos.length);
+	}
+
+	for (const buffer of Object.values(attribsBuffer)) {
+		gl.deleteBuffer(buffer);
+	}
+
+	for (const {type, location, name} of Object.values(renderable.attribs)) {
+		switch (type) {
+			case gl.FLOAT_MAT2 : for (let i = 0; i < 2; i += 1) gl.disableVertexAttribArray(location + i); break;
+			case gl.FLOAT_MAT3 : for (let i = 0; i < 3; i += 1) gl.disableVertexAttribArray(location + i); break;
+			case gl.FLOAT_MAT4 : for (let i = 0; i < 4; i += 1) gl.disableVertexAttribArray(location + i); break;
+			default: gl.disableVertexAttribArray(location);
+		}
 	}
 }
 
@@ -438,7 +470,6 @@ const tick = () => {
 	let newLasers = new Map3d();
 
 	for (const [x, y, z, incoming] of lasers.entries()) {
-		// if (Math.abs(x) > 30 || Math.abs(y) > 30 || Math.abs(z) > 30) continue;
 
 		console.assert(incoming != 0);
 
@@ -559,7 +590,7 @@ const update = () => {
 			}
 		}
 
-		console.error('should not have gotten here!');
+		return console.error('should not have gotten here!');
 	}
 
 	if (isKeyPressed['Minus']) fov = Math.max(fov - 1 * degrees, 40 * degrees);
@@ -582,6 +613,13 @@ const renderableAndTransformFromBlock = (block) => {
 }
 
 const draw = () => {
+	const forRendering = new Map();
+
+	const addForRendering = (renderable, attribs) => {
+		if (!forRendering.has(renderable)) forRendering.set(renderable, []);
+		forRendering.get(renderable).push(attribs);
+	}
+
 	window.requestAnimationFrame(draw);
 
 	gl.clearColor(0.8, 1.0, 1.0, 1.0);
@@ -593,6 +631,8 @@ const draw = () => {
 	view = Linear.multiply(Linear.rotateX(-cameraPitch), view);
 
 	const projection = Linear.perspective(fov, aspectRatio);
+
+	const closeEnough = (x, y, z) => Math.hypot(x - cameraX, y - cameraY, z - cameraZ) < 30;
 
 	for (const [x, y, z, incoming] of lasers.entries()) {
 		const models = [];
@@ -613,7 +653,7 @@ const draw = () => {
 
 		for (const it of models) {
 			const model = Linear.multiply(cubeTransform, it);
-			render(laserRenderable, {model, view, projection});
+			addForRendering(laserRenderable, {model, view, projection});
 		}
 	}
 
@@ -628,7 +668,7 @@ const draw = () => {
 		model = Linear.multiply(Linear.scale(0.5, 0.5, 0.5), model);
 		model = Linear.multiply(Linear.translate(x + 0.5, y + 0.5, z + 0.5), model);
 
-		render(renderable, {model, view, projection});
+		addForRendering(renderable, {model, view, projection});
 	}
 
 	hover: if (isHovering) {
@@ -649,7 +689,7 @@ const draw = () => {
 			model,
 		);
 
-		render(renderable, {model, view, projection});
+		addForRendering(renderable, {model, view, projection});
 	}
 
 	crosshair: {
@@ -658,8 +698,15 @@ const draw = () => {
 		transform = Linear.multiply(Linear.scale(0.01, 0.01, 0.01), transform);
 		transform = Linear.multiply(Linear.translate(0, 0, -1), transform);
 
-		render(octahedronRenderable, {transform});
+		addForRendering(octahedronRenderable, {transform});
 	}
+
+	let count = 0;
+	for (const [renderable, attribs] of forRendering.entries()) {
+		renderBatch(renderable, attribs);
+		count += attribs.length;
+	}
+	console.log('Rendering ', count, 'renderables');
 }
 
 const createRenderableFromObjAndPng = async (path) => {
@@ -749,9 +796,10 @@ const createRenderableFromObjAndPng = async (path) => {
 
 				lowp float darkness = sun_darkness * ambient_darkness;
 
-				lowp vec3 color = texture2D(t_diffuse, v_texture).xyz * (1.0 - darkness);
+				gl_FragColor = vec4(texture2D(t_diffuse, v_texture).rgb * (1.0 - darkness), 1.0);
+				// gl_FragColor = v_normal * (1.0 - darkness);
 
-				gl_FragColor = vec4(vec3(color), 1.0);
+				// gl_FragColor = vec4(v_texture, 0.0, 1.0);
 
 				// gl_FragColor = vec4(v_normal, 1.0);
 			}

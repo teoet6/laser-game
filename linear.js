@@ -1,3 +1,6 @@
+const perspectiveNear = 0.1;
+const perspectiveFar = 100;
+
 // Column major
 class Linear {
 	static multiply(a, b) {
