@@ -1,12 +1,13 @@
 class Map3d {
-	constructor() {
+	constructor(entries=[]) {
 		this.map = new Map();
+
+		for (const [x, y, z, v] of entries) this.set(x, y, z, v);
 	};
 
 	get(x, y, z, fallback) {
 		const value = this.map.get(x)?.get(y)?.get(z);
 		if (value !== undefined) return value;
-		// if (fallback !== undefined) this.set(x, y, z, fallback);
 		return fallback;
 	}
 
@@ -29,5 +30,9 @@ class Map3d {
 				}
 			}
 		}
+	}
+
+	toJSON() {
+		return Array.from(this.entries());
 	}
 }

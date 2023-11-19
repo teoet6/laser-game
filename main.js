@@ -1,3 +1,13 @@
+// NAPRAVI
+// tablo za zapazvane/zarejdane na igra
+// vwzmojnost za triene prez lazer
+// debug, podoben na maynkraft f3
+// animirani teksturi na lazerite
+// izsledvane na naqin lazerite da si smenyat qetnostta
+
+const currentVersion = 'swtvorenie-1';
+const defaultSave = '{"version":"swtvorenie-1","cameraYaw":3.556282883863645,"cameraPitch":0.4306076330520385,"cameraX":3.3892874369104993,"cameraY":3.800000000000001,"cameraZ":7.1149267376119285,"blocks":[[0,0,0,{"type":"mirror","orientation":0,"flipped":false}],[0,1,0,{"type":"mirror","orientation":1,"flipped":true}],[1,0,0,{"type":"mirror","orientation":3,"flipped":false}],[1,1,0,{"type":"mirror","orientation":3,"flipped":true}]],"lasers":[[1,1,0,1],[1,0,0,16],[0,0,0,8],[0,1,0,2]]}';
+
 const degrees = Math.PI / 180;
 
 const canvas = document.querySelector('#canvas');
@@ -5,34 +15,28 @@ const gl = canvas.getContext('webgl');
 const glInstanced = gl.getExtension('ANGLE_instanced_arrays');
 
 let fov = 90 * degrees;
+const cameraSpeed = 0.2;
 
-let cameraSpeed = 0.2;
-let cameraYaw = 45 * degrees;
-let cameraPitch = 45 * degrees;
-let cameraZ = -1.5;
-let cameraY = 2.5;
-let cameraX = -1.5;
+let cameraYaw;
+let cameraPitch;
+let cameraZ;
+let cameraY;
+let cameraX;
+
+let blocks;
+let lasers;
 
 let aspectRatio = 1;
 
-let isHovering = false;
-let hoverX;
-let hoverY;
-let hoverZ;
-let hoverK;
-let hoverNormalX;
-let hoverNormalY;
-let hoverNormalZ;
-
-let debug = false;
-
-let blocks = new Map3d();
-let lasers = new Map3d();
+let destroyPos = null;
+let createPos = null;
 
 let mirrorRenderable = null;
 
 const isKeyPressed = {};
 const isMousePressed = {};
+
+const laserRadius = 0.05;
 
 const Direction = {
 	xNeg: 0,
@@ -42,7 +46,6 @@ const Direction = {
 	yPos: 4,
 	zPos: 5,
 }
-
 
 const createRenderable = (renderable) => {
 	if (renderable.vertexSrc != undefined) {
@@ -240,7 +243,7 @@ const renderBatch = (renderable, attribsAos=[]) => {
 		gl.deleteBuffer(buffer);
 	}
 
-	for (const {type, location, name} of Object.values(renderable.attribs)) {
+	for (const {type, location} of Object.values(renderable.attribs)) {
 		switch (type) {
 			case gl.FLOAT_MAT2 : for (let i = 0; i < 2; i += 1) gl.disableVertexAttribArray(location + i); break;
 			case gl.FLOAT_MAT3 : for (let i = 0; i < 3; i += 1) gl.disableVertexAttribArray(location + i); break;
@@ -313,15 +316,15 @@ const laserRenderable = createRenderable({
 
 	arrays: {
 		pos: new Float32Array([
-			0, -0.05, -0.05,
-			0, -0.05, +0.05,
-			0, +0.05, +0.05,
-			0, +0.05, -0.05,
+			0, -laserRadius, -laserRadius,
+			0, -laserRadius, +laserRadius,
+			0, +laserRadius, +laserRadius,
+			0, +laserRadius, -laserRadius,
 
-			1, -0.05, -0.05,
-			1, -0.05, +0.05,
-			1, +0.05, +0.05,
-			1, +0.05, -0.05,
+			1, -laserRadius, -laserRadius,
+			1, -laserRadius, +laserRadius,
+			1, +laserRadius, +laserRadius,
+			1, +laserRadius, -laserRadius,
 		]),
 	},
 	elements: new Uint16Array([
@@ -352,8 +355,6 @@ window.addEventListener('keydown', ({code}) => {
 	if (!document.pointerLockElement) return;
 
 	isKeyPressed[code] = true;
-
-	if (code == 'Space') debug = true;
 });
 
 window.addEventListener('keyup', ({code}) => {
@@ -377,12 +378,12 @@ window.addEventListener('mousedown', ({button}) => {
 
 	isMousePressed[button] = true;
 
-	if (isHovering && button == 2) {
-		blocks.set(hoverX + hoverNormalX, hoverY + hoverNormalY, hoverZ + hoverNormalZ, getBlockForPlacement());
+	if (createPos && button == 0) {
+		blocks.set(createPos[0], createPos[1], createPos[2], getBlockForPlacement());
 	}
 
-	if (isHovering && button == 0) {
-		blocks.set(hoverX, hoverY, hoverZ);
+	if (destroyPos && button == 2) {
+		blocks.set(destroyPos[0], destroyPos[1], destroyPos[2]);
 	}
 });
 
@@ -408,7 +409,6 @@ window.addEventListener('mousemove', ev => {
 });
 
 const debugLog = (...args) => {
-	if (!debug) return;
 	console.log(...args);
 }
 
@@ -485,8 +485,6 @@ const tick = () => {
 		if (outgoing & 1 << Direction.zPos) newLasers.set(x, y, z + 1, newLasers.get(x, y, z + 1, 0) | 1 << Direction.zNeg);
 	}
 
-	newLasers.set(-10, 0, 0, 1 << 0);
-
 	lasers = newLasers;
 }
 
@@ -500,8 +498,8 @@ const update = () => {
 		if (isKeyPressed['KeyA']) deltaCameraX -= 1;
 		if (isKeyPressed['KeyW']) deltaCameraZ += 1;
 		if (isKeyPressed['KeyS']) deltaCameraZ -= 1;
-		if (isKeyPressed['KeyQ']) deltaCameraY += 1;
-		if (isKeyPressed['KeyE']) deltaCameraY -= 1;
+		if (isKeyPressed['KeyE']) deltaCameraY += 1;
+		if (isKeyPressed['KeyQ']) deltaCameraY -= 1;
 
 		const mag = Math.hypot(deltaCameraX, deltaCameraY, deltaCameraZ);
 
@@ -525,7 +523,7 @@ const update = () => {
 		cameraZ += deltaCameraZ;
 	}
 
-	hover: {
+	rayCast: {
 		const [dX, dY, dZ] = getCameraFront();
 		const offsetX = dX < 0 ? 1 : 0;
 		const offsetY = dY < 0 ? 1 : 0;
@@ -545,48 +543,98 @@ const update = () => {
 			if (dY == 0) kY = Infinity;
 			if (dZ == 0) kZ = Infinity;
 
-			hoverK = Math.min(kX, kY, kZ);
+			let k = Math.min(kX, kY, kZ);
 
-			if (hoverK > 10) {
-				isHovering = false;
-				break hover;
+			if (k > 10) {
+				createPos = null;
+				destroyPos = null;
+				break rayCast;
 			};
 
-			if (hoverK == kX) {
-				hoverX = curX;
-				hoverY = Math.floor(dY * hoverK + cameraY);
-				hoverZ = Math.floor(dZ * hoverK + cameraZ);
+			let castX;
+			let castY;
+			let castZ;
+
+			let castNormalX;
+			let castNormalY;
+			let castNormalZ;
+
+			if (k == kX) {
+				castX = curX;
+				castY = Math.floor(dY * k + cameraY);
+				castZ = Math.floor(dZ * k + cameraZ);
 
 				curX += sign(dX);
 
-				hoverNormalX = -sign(dX);
-				hoverNormalY = 0;
-				hoverNormalZ = 0;
-			} else if (hoverK == kY) {
-				hoverX = Math.floor(dX * hoverK + cameraX);
-				hoverY = curY;
-				hoverZ = Math.floor(dZ * hoverK + cameraZ);
+				castNormalX = -sign(dX);
+				castNormalY = 0;
+				castNormalZ = 0;
+			} else if (k == kY) {
+				castX = Math.floor(dX * k + cameraX);
+				castY = curY;
+				castZ = Math.floor(dZ * k + cameraZ);
 
 				curY += sign(dY);
 
-				hoverNormalX = 0;
-				hoverNormalY = -sign(dY);
-				hoverNormalZ = 0;
-			} else if (hoverK == kZ) {
-				hoverX = Math.floor(dX * hoverK + cameraX);
-				hoverY = Math.floor(dY * hoverK + cameraY);
-				hoverZ = curZ;
+				castNormalX = 0;
+				castNormalY = -sign(dY);
+				castNormalZ = 0;
+			} else if (k == kZ) {
+				castX = Math.floor(dX * k + cameraX);
+				castY = Math.floor(dY * k + cameraY);
+				castZ = curZ;
 
 				curZ += sign(dZ);
 
-				hoverNormalX = 0;
-				hoverNormalY = 0;
-				hoverNormalZ = -sign(dZ);
+				castNormalX = 0;
+				castNormalY = 0;
+				castNormalZ = -sign(dZ);
 			}
 
-			if (blocks.get(hoverX, hoverY, hoverZ)) {
-				isHovering = true;
-				break hover;
+			const block = blocks.get(castX, castY, castZ, {type: 'air'});
+			if (block.type != 'air') {
+				destroyPos = [castX, castY, castZ];
+				createPos = [castX + castNormalX, castY + castNormalY, castZ + castNormalZ];
+				break rayCast;
+			}
+
+			const incoming = lasers.get(castX, castY, castZ, 0);
+			if (incoming) {
+				const mask = incoming | getOutgoing(block, incoming);
+
+				let minDistanceSquared = Infinity;
+
+				const updateMinDistanceSquared = (posX, posY, posZ, dX, dY, dZ, cylinderX, cylinderY, cylinderZ1, cylinderZ2) => {
+					const tryK = (k) => {
+						if (k * dZ + posZ < cylinderZ1 || k * dZ + posZ > cylinderZ2) return;
+						minDistanceSquared = Math.min(minDistanceSquared, 0
+							+ (k * dX + posX - cylinderX) ** 2
+							+ (k * dY + posY - cylinderY) ** 2
+						);
+					}
+
+					if (dZ != 0) {
+						for (const cylinderZ of [cylinderZ1, cylinderZ2]) {
+							tryK((cylinderZ - posZ) / dZ)
+						}
+					}
+
+					tryK((dX * (cylinderX - posX) + dY * (cylinderY - posY)) / (dX ** 2 + dY ** 2));
+				}
+
+				// NAPRAVI go po-qetlivo
+				if (mask & 1 << Direction.xNeg) updateMinDistanceSquared(cameraY, cameraZ, cameraX, dY, dZ, dX, castY + 0.5, castZ + 0.5, castX + 0.0, castX + 0.5);
+				if (mask & 1 << Direction.xPos) updateMinDistanceSquared(cameraY, cameraZ, cameraX, dY, dZ, dX, castY + 0.5, castZ + 0.5, castX + 0.5, castX + 1.0);
+				if (mask & 1 << Direction.yNeg) updateMinDistanceSquared(cameraZ, cameraX, cameraY, dZ, dX, dY, castZ + 0.5, castX + 0.5, castY + 0.0, castY + 0.5);
+				if (mask & 1 << Direction.yPos) updateMinDistanceSquared(cameraZ, cameraX, cameraY, dZ, dX, dY, castZ + 0.5, castX + 0.5, castY + 0.5, castY + 1.0);
+				if (mask & 1 << Direction.zNeg) updateMinDistanceSquared(cameraX, cameraY, cameraZ, dX, dY, dZ, castX + 0.5, castY + 0.5, castZ + 0.0, castZ + 0.5);
+				if (mask & 1 << Direction.zPos) updateMinDistanceSquared(cameraX, cameraY, cameraZ, dX, dY, dZ, castX + 0.5, castY + 0.5, castZ + 0.5, castZ + 1.0);
+
+				if (minDistanceSquared < (laserRadius / Math.sqrt(2)) ** 2) {
+					destroyPos = null;
+					createPos = [castX, castY, castZ];
+					break rayCast;
+				}
 			}
 		}
 
@@ -632,22 +680,21 @@ const draw = () => {
 
 	const projection = Linear.perspective(fov, aspectRatio);
 
-	const closeEnough = (x, y, z) => Math.hypot(x - cameraX, y - cameraY, z - cameraZ) < 30;
+	// const closeEnough = (x, y, z) => Math.hypot(x - cameraX, y - cameraY, z - cameraZ) < 30;
 
 	for (const [x, y, z, incoming] of lasers.entries()) {
 		const models = [];
 
 		const block = blocks.get(x, y, z, {type: 'air'});
-		const outgoing = getOutgoing(block, incoming);
 
-		for (const mask of [incoming, outgoing]) {
-			if (mask & 1 << Direction.xNeg) models.push(Linear.rotateZ(180 * degrees));
-			if (mask & 1 << Direction.yNeg) models.push(Linear.rotateZ(-90 * degrees));
-			if (mask & 1 << Direction.zNeg) models.push(Linear.rotateY(+90 * degrees));
-			if (mask & 1 << Direction.xPos) models.push(Linear.identity());
-			if (mask & 1 << Direction.yPos) models.push(Linear.rotateZ(+90 * degrees));
-			if (mask & 1 << Direction.zPos) models.push(Linear.rotateY(-90 * degrees));
-		}
+		const mask = incoming | getOutgoing(block, incoming);
+
+		if (mask & 1 << Direction.xNeg) models.push(Linear.rotateZ(180 * degrees));
+		if (mask & 1 << Direction.yNeg) models.push(Linear.rotateZ(-90 * degrees));
+		if (mask & 1 << Direction.zNeg) models.push(Linear.rotateY(+90 * degrees));
+		if (mask & 1 << Direction.xPos) models.push(Linear.identity());
+		if (mask & 1 << Direction.yPos) models.push(Linear.rotateZ(+90 * degrees));
+		if (mask & 1 << Direction.zPos) models.push(Linear.rotateY(-90 * degrees));
 
 		const cubeTransform = Linear.multiply(Linear.translate(x + 0.5, y + 0.5, z + 0.5), Linear.scale(0.5, 0.5, 0.5));
 
@@ -671,7 +718,7 @@ const draw = () => {
 		addForRendering(renderable, {model, view, projection});
 	}
 
-	hover: if (isHovering) {
+	hover: if (createPos) {
 		let [renderable, model] = renderableAndTransformFromBlock(getBlockForPlacement());
 
 		if (renderable == null) {
@@ -682,9 +729,9 @@ const draw = () => {
 		model = Linear.multiply(Linear.scale(0.1, 0.1, 0.1), model);
 		model = Linear.multiply(
 			Linear.translate(
-				hoverX + hoverNormalX + 0.5,
-				hoverY + hoverNormalY + 0.5,
-				hoverZ + hoverNormalZ + 0.5,
+				createPos[0] + 0.5,
+				createPos[1] + 0.5,
+				createPos[2] + 0.5,
 			),
 			model,
 		);
@@ -706,7 +753,6 @@ const draw = () => {
 		renderBatch(renderable, attribs);
 		count += attribs.length;
 	}
-	console.log('Rendering ', count, 'renderables');
 }
 
 const createRenderableFromObjAndPng = async (path) => {
@@ -744,7 +790,7 @@ const createRenderableFromObjAndPng = async (path) => {
 					fn.push(...vn[vnIdx]);
 				}
 				break;
-			default: console.log('Ignoring line:', line);
+			default: console.log('Ignoring obj line:', line);
 		}
 	}
 
@@ -811,11 +857,7 @@ const createRenderableFromObjAndPng = async (path) => {
 const setup = async () => {
 	mirrorRenderable = await createRenderableFromObjAndPng('assets/ogledalo');
 
-	blocks.set(0, 0, 0, {
-		type: 'mirror',
-		orientation: 0,
-		flipped: false,
-	});
+	fromJSON(JSON.parse(defaultSave));
 
 	window.requestAnimationFrame(draw);
 	window.setInterval(update, 10);
@@ -823,3 +865,31 @@ const setup = async () => {
 }
 
 setup();
+
+const toJSON = () => {
+	return {
+		version: currentVersion,
+		cameraYaw,
+		cameraPitch,
+		cameraX,
+		cameraY,
+		cameraZ,
+		blocks: blocks.toJSON(),
+		lasers: lasers.toJSON(),
+	}
+}
+
+const fromJSON = (json) => {
+	if (json.version != currentVersion) return `save file version is ${json.version}, current version is ${currentVersion}`;
+
+	cameraYaw   = json.cameraYaw;
+	cameraPitch = json.cameraPitch;
+	cameraX     = json.cameraX;
+	cameraY     = json.cameraY;
+	cameraZ     = json.cameraZ;
+
+	blocks = new Map3d(json.blocks);
+	lasers = new Map3d(json.lasers);
+
+	return null;
+}
