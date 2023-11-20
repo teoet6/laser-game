@@ -1,9 +1,13 @@
 // NAPRAVI
+// model za preqexti si lazeri
+// po-agresiven cwling
 // tablo za zapazvane/zarejdane na igra
-// vwzmojnost za triene prez lazer
 // debug, podoben na maynkraft f3
-// animirani teksturi na lazerite
 // izsledvane na naqin lazerite da si smenyat qetnostta
+// vwzmojnost za triene prez lazer
+
+// NAPRAVENI
+// animirani teksturi na lazerite
 
 const currentVersion = 'swtvorenie-1';
 const defaultSave = '{"version":"swtvorenie-1","cameraYaw":3.556282883863645,"cameraPitch":0.4306076330520385,"cameraX":3.3892874369104993,"cameraY":3.800000000000001,"cameraZ":7.1149267376119285,"blocks":[[0,0,0,{"type":"mirror","orientation":0,"flipped":false}],[0,1,0,{"type":"mirror","orientation":1,"flipped":true}],[1,0,0,{"type":"mirror","orientation":3,"flipped":false}],[1,1,0,{"type":"mirror","orientation":3,"flipped":true}]],"lasers":[[1,1,0,1],[1,0,0,16],[0,0,0,8],[0,1,0,2]]}';
@@ -115,6 +119,20 @@ const createRenderable = (renderable) => {
 				index: index,
 			};
 		}
+
+		renderable.uniforms = {};
+		const uniformCount = gl.getProgramParameter(renderable.program, gl.ACTIVE_UNIFORMS);
+		for (let index = 0; index < uniformCount; index += 1) {
+			const uniform = gl.getActiveUniform(renderable.program, index);
+			const location = gl.getUniformLocation(renderable.program, uniform.name);
+			renderable.uniforms[uniform.name] = {
+				name: uniform.name,
+				size: uniform.size,
+				type: uniform.type,
+				location: location,
+				index: index,
+			};
+		}
 	}
 
 	if (!renderable.mode) return console.error('Rendering mode not specified')
@@ -155,7 +173,7 @@ const renderBatch = (renderable, attribsAos=[]) => {
 				default: return console.error('Unrecognized attribute type:', attrib.type);
 			}
 
-			glInstanced.vertexAttribDivisorANGLE(attrib.location, 0); // TODO unify this and the instance drawing
+			glInstanced.vertexAttribDivisorANGLE(attrib.location, 0); // NAPRAVI tova i risuvaneto po instancii v edin kod
 		}
 	}
 
@@ -230,6 +248,10 @@ const renderBatch = (renderable, attribsAos=[]) => {
 		}
 	}
 
+	if (renderable.uniforms.u_time != undefined) {
+		gl.uniform1f(renderable.uniforms.u_time.location, performance.now() / 1000);
+	}
+
 	if (renderable.elementBuffer != undefined) {
 		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, renderable.elementBuffer);
 		// gl.drawElements(renderable.mode, renderable.count, gl.UNSIGNED_SHORT, 0);
@@ -290,52 +312,6 @@ const octahedronRenderable = createRenderable({
 		1, 2, 5,
 		1, 3, 4,
 		1, 3, 5,
-	]),
-});
-
-const laserRenderable = createRenderable({
-	mode: gl.TRIANGLES,
-	count: 8 * 3,
-	vertexSrc: `
-		attribute vec3 a_pos;
-
-		attribute mat4 a_model;
-		attribute mat4 a_view;
-		attribute mat4 a_projection;
-
-		void main() {
-			gl_Position = a_projection * a_view * a_model * vec4(a_pos, 1.0);
-			// gl_Position = a_projection * a_view * vec4(a_pos, 1.0);
-		}
-	`,
-	fragmentSrc: `
-		void main() {
-			gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
-		}
-	`,
-
-	arrays: {
-		pos: new Float32Array([
-			0, -laserRadius, -laserRadius,
-			0, -laserRadius, +laserRadius,
-			0, +laserRadius, +laserRadius,
-			0, +laserRadius, -laserRadius,
-
-			1, -laserRadius, -laserRadius,
-			1, -laserRadius, +laserRadius,
-			1, +laserRadius, +laserRadius,
-			1, +laserRadius, -laserRadius,
-		]),
-	},
-	elements: new Uint16Array([
-		0, 1, 4,
-		4, 5, 1,
-		1, 2, 5,
-		5, 6, 2,
-		2, 3, 6,
-		6, 7, 3,
-		3, 0, 7,
-		7, 4, 0,
 	]),
 });
 
@@ -641,7 +617,7 @@ const update = () => {
 		return console.error('should not have gotten here!');
 	}
 
-	if (isKeyPressed['Minus']) fov = Math.max(fov - 1 * degrees, 40 * degrees);
+	if (isKeyPressed['Minus']) fov = Math.max(fov - 1 * degrees, 20 * degrees);
 	if (isKeyPressed['Equal']) fov = Math.min(fov + 1 * degrees, 170 * degrees);
 }
 
@@ -686,15 +662,20 @@ const draw = () => {
 		const models = [];
 
 		const block = blocks.get(x, y, z, {type: 'air'});
+		const outgoing = getOutgoing(block, incoming);
 
-		const mask = incoming | getOutgoing(block, incoming);
+		// NAPRAVI go po-qetimo
+		for (let i = 0; i < 2; i += 1) {
+			const mask = [incoming, outgoing][i];
+			const transform = [Linear.identity(), Linear.multiply(Linear.translate(0, 0, 1), Linear.scale(1, 1, -1))][i];
 
-		if (mask & 1 << Direction.xNeg) models.push(Linear.rotateZ(180 * degrees));
-		if (mask & 1 << Direction.yNeg) models.push(Linear.rotateZ(-90 * degrees));
-		if (mask & 1 << Direction.zNeg) models.push(Linear.rotateY(+90 * degrees));
-		if (mask & 1 << Direction.xPos) models.push(Linear.identity());
-		if (mask & 1 << Direction.yPos) models.push(Linear.rotateZ(+90 * degrees));
-		if (mask & 1 << Direction.zPos) models.push(Linear.rotateY(-90 * degrees));
+			if (mask & 1 << Direction.xNeg) models.push(Linear.multiply(Linear.scale(-1, 1, 1), Linear.rotateY(+90 * degrees), transform));
+			if (mask & 1 << Direction.yNeg) models.push(Linear.multiply(Linear.scale(1, -1, 1), Linear.rotateX(-90 * degrees), transform));
+			if (mask & 1 << Direction.zNeg) models.push(Linear.multiply(Linear.scale(1, 1, -1), Linear.identity(),             transform));
+			if (mask & 1 << Direction.xPos) models.push(Linear.multiply(                        Linear.rotateY(+90 * degrees), transform));
+			if (mask & 1 << Direction.yPos) models.push(Linear.multiply(                        Linear.rotateX(-90 * degrees), transform));
+			if (mask & 1 << Direction.zPos) models.push(Linear.multiply(                        Linear.identity(),             transform));
+		}
 
 		const cubeTransform = Linear.multiply(Linear.translate(x + 0.5, y + 0.5, z + 0.5), Linear.scale(0.5, 0.5, 0.5));
 
@@ -755,7 +736,7 @@ const draw = () => {
 	}
 }
 
-const createRenderableFromObjAndPng = async (path) => {
+const renderableDefinitionFromObjAndPng = async (path) => {
 	const response = await fetch(`${path}.obj`);
 	const raw = await response.text();
 
@@ -843,11 +824,6 @@ const createRenderableFromObjAndPng = async (path) => {
 				lowp float darkness = sun_darkness * ambient_darkness;
 
 				gl_FragColor = vec4(texture2D(t_diffuse, v_texture).rgb * (1.0 - darkness), 1.0);
-				// gl_FragColor = v_normal * (1.0 - darkness);
-
-				// gl_FragColor = vec4(v_texture, 0.0, 1.0);
-
-				// gl_FragColor = vec4(v_normal, 1.0);
 			}
 		`,
 		images: [img],
@@ -855,7 +831,23 @@ const createRenderableFromObjAndPng = async (path) => {
 }
 
 const setup = async () => {
-	mirrorRenderable = await createRenderableFromObjAndPng('assets/ogledalo');
+	mirrorRenderable = createRenderable(await renderableDefinitionFromObjAndPng('assets/ogledalo'));
+
+	laserRenderable  = createRenderable({
+		...await renderableDefinitionFromObjAndPng('assets/lazer'),
+		fragmentSrc: `
+			varying mediump vec2 v_texture;
+			varying mediump vec3 v_normal;
+
+			uniform sampler2D t_diffuse;
+
+			uniform mediump float u_time;
+
+			void main() {
+				gl_FragColor = vec4(texture2D(t_diffuse, v_texture + vec2(0.0, u_time)).rgb, 1.0);
+			}
+		`,
+	});
 
 	fromJSON(JSON.parse(defaultSave));
 

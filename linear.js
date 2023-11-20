@@ -3,7 +3,7 @@ const perspectiveFar = 100;
 
 // Column major
 class Linear {
-	static multiply(a, b) {
+	static mat4Mat4(a, b) {
 		const c = new Float32Array(16);
 		for (let col = 0; col < 4; col += 1) {
 			for (let idx = 0; idx < 4; idx += 1) {
@@ -13,6 +13,16 @@ class Linear {
 			}
 		}
 		return c;
+	}
+
+	static multiply(...matrices) {
+		if (matrices.length == 0) return Linear.identity();
+
+		let ret = matrices[0].slice();
+		for (let i = 1; i < matrices.length; i += 1) {
+			ret = Linear.mat4Mat4(ret, matrices[i]);
+		}
+		return ret;
 	}
 
 	static identity() {
