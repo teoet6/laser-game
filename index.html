@@ -13,9 +13,42 @@
 				left: 0;
 				z-index: -1;
 			}
+
+			button {
+				cursor: pointer;
+			}
+
+			.hidden {
+				display: none;
+			}
 		</style>
-		<p>Движение -- WASD | Летене -- QE | Поставяне -- Ляво копче на мишката | Премахване -- Дясно копче на мишката</p>
-		<canvas id=canvas> </canvas>
+
+		<button id='save-game'>Запази игра</button>
+		<button id='load-game'>Зареди игра</button>
+		<button id='new-game'>Нова игра</button>
+
+		<table>
+			<tr>
+				<td>Движение</td>
+				<td>WASD</td>
+			</tr>
+			<tr>
+				<td>Летене</td>
+				<td>QE</td>
+			</tr>
+			<tr>
+				<td>Поставяне</td>
+				<td>Ляво копче на мишката</td>
+			</tr>
+			<tr>
+				<td>Премахване</td>
+				<td>Дясно копче на мишката</td>
+			</tr>
+		</table>
+
+		<p id='debug-info' class='hidden'></p>
+
+		<canvas id='canvas'> </canvas>
 		<script src='linear.js'></script>
 		<script src='map3d.js'></script>
 		<script src='main.js'></script>

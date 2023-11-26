@@ -1,25 +1,22 @@
 // NAPRAVI
-// model za preqexti si lazeri
-// po-agresiven cwling
 // tablo za zapazvane/zarejdane na igra
-// debug, podoben na maynkraft f3
+// model za preqexti si lazeri
 // izsledvane na naqin lazerite da si smenyat qetnostta
 // vwzmojnost za triene prez lazer
 
-// NAPRAVENI
-// animirani teksturi na lazerite
+const $ = (query) => document.querySelector(query);
 
 const currentVersion = 'swtvorenie-1';
-const defaultSave = '{"version":"swtvorenie-1","cameraYaw":3.556282883863645,"cameraPitch":0.4306076330520385,"cameraX":3.3892874369104993,"cameraY":3.800000000000001,"cameraZ":7.1149267376119285,"blocks":[[0,0,0,{"type":"mirror","orientation":0,"flipped":false}],[0,1,0,{"type":"mirror","orientation":1,"flipped":true}],[1,0,0,{"type":"mirror","orientation":3,"flipped":false}],[1,1,0,{"type":"mirror","orientation":3,"flipped":true}]],"lasers":[[1,1,0,1],[1,0,0,16],[0,0,0,8],[0,1,0,2]]}';
+const defaultSavedGame = '{"version":"swtvorenie-1","cameraYaw":3.556282883863645,"cameraPitch":0.4306076330520385,"cameraX":3.3892874369104993,"cameraY":3.800000000000001,"cameraZ":7.1149267376119285,"blocks":[[0,0,0,{"type":"mirror","orientation":0,"flipped":false}],[0,1,0,{"type":"mirror","orientation":1,"flipped":true}],[1,0,0,{"type":"mirror","orientation":3,"flipped":false}],[1,1,0,{"type":"mirror","orientation":3,"flipped":true}]],"lasers":[[1,1,0,1],[1,0,0,16],[0,0,0,8],[0,1,0,2]]}';
 
 const degrees = Math.PI / 180;
 
-const canvas = document.querySelector('#canvas');
+const canvas = $('#canvas');
 const gl = canvas.getContext('webgl');
 const glInstanced = gl.getExtension('ANGLE_instanced_arrays');
 
 let fov = 90 * degrees;
-const cameraSpeed = 0.2;
+const cameraSpeed = 10;
 
 let cameraYaw;
 let cameraPitch;
@@ -36,6 +33,10 @@ let destroyPos = null;
 let createPos = null;
 
 let mirrorRenderable = null;
+
+let tickTime = 0;
+let updateTime = 0;
+let drawTime = 0;
 
 const isKeyPressed = {};
 const isMousePressed = {};
@@ -142,6 +143,8 @@ const createRenderable = (renderable) => {
 }
 
 const renderBatch = (renderable, attribsAos=[]) => {
+	if (attribsAos.length == 0) return;
+
 	const instanceAttribPointer = (location, dimension, type, norm, stride, offset) => {
 		gl.enableVertexAttribArray(location);
 		gl.vertexAttribPointer(location, dimension, type, norm, stride, offset);
@@ -185,31 +188,27 @@ const renderBatch = (renderable, attribsAos=[]) => {
 	}
 
 	const attribsSoa = {};
-	const attribsType = {};
-	const attribsCount = {};
+	const attribsElementsPerInstance = {};
 	const attribsBuffer = {};
 
-	for (const it of attribsAos) {
-		for (const [key, value] of Object.entries(it)) {
-			if (attribsSoa[key] == undefined) attribsSoa[key] = [];
-			attribsSoa[key].push(...value);
-
-			if (attribsCount[key] == undefined) attribsCount[key] = 0;
-			attribsCount[key] += 1;
-
-			if (attribsType[key] == undefined) attribsType[key] = Object.getPrototypeOf(value);
-			if (Object.getPrototypeOf(value) != attribsType[key]) return console.error(key, 'has mismatching types', Object.getPrototypeOf(value), attribsType[key]);
-		}
+	for (const [key, value] of Object.entries(attribsAos[0])) {
+		attribsElementsPerInstance[key] = value.length;
+		const AttribTypedArray = Object.getPrototypeOf(value).constructor;
+		attribsSoa[key] = new AttribTypedArray(attribsAos.length * attribsElementsPerInstance[key]);
 	}
 
-	for (const [key, count] of Object.entries(attribsCount)) {
-		if (count != attribsAos.length) return console.error(key, 'has', count, 'occurences in', attribsAos.length, 'instances');
+	for (let instanceIdx = 0; instanceIdx < attribsAos.length; instanceIdx += 1) {
+		for (const [key, value] of Object.entries(attribsAos[instanceIdx])) {
+			for (let idx = 0; idx < value.length; idx += 1) {
+				attribsSoa[key][instanceIdx * attribsElementsPerInstance[key] + idx] = value[idx];
+			}
+		}
 	}
 
 	for (const name of Object.keys(attribsSoa)) {
 		attribsBuffer[name] = gl.createBuffer();
 		gl.bindBuffer(gl.ARRAY_BUFFER, attribsBuffer[name]);
-		gl.bufferData(gl.ARRAY_BUFFER, new attribsType[name].constructor(attribsSoa[name]), gl.STREAM_DRAW);
+		gl.bufferData(gl.ARRAY_BUFFER, attribsSoa[name], gl.STREAM_DRAW);
 
 		const attrib = renderable.attribs['a_' + name];
 
@@ -222,8 +221,8 @@ const renderBatch = (renderable, attribsAos=[]) => {
 					dimension,
 					type,
 					false,
-					attribsType[name].BYTES_PER_ELEMENT * dimension * dimension,
-					attribsType[name].BYTES_PER_ELEMENT * dimension * i,
+					attribsSoa[name].BYTES_PER_ELEMENT * dimension * dimension,
+					attribsSoa[name].BYTES_PER_ELEMENT * dimension * i,
 				);
 			}
 		}
@@ -325,10 +324,25 @@ const resize = () => {
 resize();
 window.onresize = resize;
 
+$('#save-game').addEventListener('click', () => {
+
+})
+
+$('#load-game').addEventListener('click', () => {
+
+})
+
+$('#new-game').addEventListener('click', () => {
+	if (!confirm('Сигурни ли сте че искате да създадете нова игра?')) return;
+	fromJSON(JSON.parse(defaultSavedGame));
+})
+
 canvas.addEventListener('click', async () => canvas.requestPointerLock());
 
 window.addEventListener('keydown', ({code}) => {
 	if (!document.pointerLockElement) return;
+
+	if (code == 'Backquote') $('#debug-info').classList.toggle('hidden');
 
 	isKeyPressed[code] = true;
 });
@@ -443,6 +457,8 @@ const getOutgoing = (block, incoming) => {
 }
 
 const tick = () => {
+	tickTime = -performance.now();
+
 	let newLasers = new Map3d();
 
 	for (const [x, y, z, incoming] of lasers.entries()) {
@@ -462,9 +478,13 @@ const tick = () => {
 	}
 
 	lasers = newLasers;
+
+	tickTime += performance.now();
 }
 
-const update = () => {
+const update = (deltaTime) => {
+	updateTime = -performance.now();
+
 	camera: {
 		let deltaCameraX = 0;
 		let deltaCameraY = 0;
@@ -485,9 +505,9 @@ const update = () => {
 		deltaCameraY /= mag;
 		deltaCameraZ /= mag;
 
-		deltaCameraX *= cameraSpeed;
-		deltaCameraY *= cameraSpeed;
-		deltaCameraZ *= cameraSpeed;
+		deltaCameraX *= cameraSpeed * deltaTime;
+		deltaCameraY *= cameraSpeed * deltaTime;
+		deltaCameraZ *= cameraSpeed * deltaTime;
 
 		[deltaCameraX, deltaCameraY, deltaCameraZ] = Linear.mat4Vec3(
 			Linear.rotateY(cameraYaw),
@@ -614,11 +634,13 @@ const update = () => {
 			}
 		}
 
-		return console.error('should not have gotten here!');
+		console.error('should not have gotten here!');
 	}
 
-	if (isKeyPressed['Minus']) fov = Math.max(fov - 1 * degrees, 20 * degrees);
-	if (isKeyPressed['Equal']) fov = Math.min(fov + 1 * degrees, 170 * degrees);
+	if (isKeyPressed['Minus']) fov = Math.max(fov - 50 * degrees * deltaTime, 20 * degrees);
+	if (isKeyPressed['Equal']) fov = Math.min(fov + 50 * degrees * deltaTime, 170 * degrees);
+
+	updateTime += performance.now();
 }
 
 gl.enable(gl.DEPTH_TEST);
@@ -637,14 +659,14 @@ const renderableAndTransformFromBlock = (block) => {
 }
 
 const draw = () => {
+	drawTime = -performance.now();
+
 	const forRendering = new Map();
 
 	const addForRendering = (renderable, attribs) => {
 		if (!forRendering.has(renderable)) forRendering.set(renderable, []);
 		forRendering.get(renderable).push(attribs);
 	}
-
-	window.requestAnimationFrame(draw);
 
 	gl.clearColor(0.8, 1.0, 1.0, 1.0);
 	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -734,6 +756,15 @@ const draw = () => {
 		renderBatch(renderable, attribs);
 		count += attribs.length;
 	}
+
+	drawTime += performance.now();
+
+	$('#debug-info').innerText = [
+		`tick time [ms] -- ${tickTime}`,
+		`draw time [ms] -- ${drawTime}`,
+		`update time [ms] -- ${updateTime}`,
+		`render count -- ${count}`,
+	].join('\n');
 }
 
 const renderableDefinitionFromObjAndPng = async (path) => {
@@ -830,6 +861,34 @@ const renderableDefinitionFromObjAndPng = async (path) => {
 	});
 }
 
+const saveToLocalStorage = () => {
+	localStorage.setItem('savedGame', JSON.stringify(toJSON()));
+}
+
+const intervals = [
+	{ callback: draw,               minInterval:    0 },
+	{ callback: update,             minInterval:    0 },
+	{ callback: tick,               minInterval:  250 },
+	{ callback: saveToLocalStorage, minInterval: 1000 },
+];
+
+for (const it of intervals) it.then = performance.now();
+
+const onAnimationFrame = () => {
+	window.requestAnimationFrame(onAnimationFrame);
+
+	for (const it of intervals) {
+		const now = performance.now();
+
+		const actualInterval = now - it.then;
+
+		if (actualInterval > it.minInterval) {
+			it.then = now;
+			it.callback(actualInterval / 1000);
+		}
+	}
+}
+
 const setup = async () => {
 	mirrorRenderable = createRenderable(await renderableDefinitionFromObjAndPng('assets/ogledalo'));
 
@@ -849,11 +908,9 @@ const setup = async () => {
 		`,
 	});
 
-	fromJSON(JSON.parse(defaultSave));
+	fromJSON(JSON.parse(localStorage.getItem('savedGame') ?? defaultSavedGame));
 
-	window.requestAnimationFrame(draw);
-	window.setInterval(update, 10);
-	window.setInterval(tick,  250);
+	window.requestAnimationFrame(onAnimationFrame);
 }
 
 setup();
