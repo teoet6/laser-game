@@ -1,5 +1,4 @@
 // NAPRAVI
-// tablo za zapazvane/zarejdane na igra
 // model za preqexti si lazeri
 // izsledvane na naqin lazerite da si smenyat qetnostta
 // vwzmojnost za triene prez lazer
@@ -324,12 +323,29 @@ const resize = () => {
 resize();
 window.onresize = resize;
 
-$('#save-game').addEventListener('click', () => {
-
+$('#save-game').addEventListener('click', async () => {
+	const blob = new Blob([JSON.stringify(toJSON())]);
+	const dataUrl = await new Promise(res => {
+		const reader = new FileReader();
+		reader.addEventListener('load', () => res(reader.result));
+		reader.readAsDataURL(blob);
+	});
+	const anchor = document.createElement('a');
+	anchor.href = dataUrl;
+	anchor.download = 'igra-s-lazeri.isl';
+	anchor.click();
 })
 
 $('#load-game').addEventListener('click', () => {
-
+	const input = document.createElement('input');
+	input.type = 'file';
+	input.accept = '.isl';
+	input.addEventListener('change', async () => {
+		const file = input.files[0]
+		if (!file) return;
+		fromJSON(JSON.parse(await file.text()));
+	})
+	input.click();
 })
 
 $('#new-game').addEventListener('click', () => {
